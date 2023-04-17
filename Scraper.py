@@ -1,5 +1,5 @@
 # https://www.actowizsolutions.com/scrape-sports-betting-props-from-prizepicks.php
-#Written by Ethan Roush
+# Written by Ethan Roush
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
