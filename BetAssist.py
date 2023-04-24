@@ -5,89 +5,217 @@ from nba_api.stats.endpoints import playergamelog
 from Scraper import Scraper
 
 # GLOBALS
+OPPONENT_IND = 4
 POINT_IND = 24
 REB_IND = 18
 ASSIST_IND = 19
+STEAL_IND = 20
+BLOCK_IND = 21
+FTM_IND = 13
+FGA_IND = 8
+THREE_POINT_MAKE_IND = 10
+TO_IND = 22
+PF_IND = 23
+
+NUM_GAMES_WEIGHT = 0.5
+SEASON_WEIGHT = 0.25
+SEASON_WEIGHT_NO_OPPONENT = 1 - NUM_GAMES_WEIGHT
+VERSUS_OPPONENT_WEIGHT = 0.25
 
 
 class BetAssist:
     def _getGames(self, playerID):
-        gamelogs = playergamelog.PlayerGameLog(playerID)
-        return gamelogs.get_dict()['resultSets'][0]['rowSet']
+        regularSeasonGamelogs = playergamelog.PlayerGameLog(playerID)
+        playoffGameLogs = playergamelog.PlayerGameLog(playerID, season_type_all_star="Playoffs")
+        regularSeasonGames = regularSeasonGamelogs.get_dict()['resultSets'][0]['rowSet']
+        playoffGames = playoffGameLogs.get_dict()['resultSets'][0]['rowSet']
+        playoffGames.extend(regularSeasonGames)
+        return playoffGames
 
-    # TODO: take into account missed games
     def _getPlayerStatlines(self, playerID, numGames):
         games = self._getGames(playerID)
-        statlines = []
+        abridgedStatlines = []
         for i in range(0, numGames):
-            game_dict = {'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND]}
-            statlines.append(game_dict)
-        return statlines
+            game_dict = {'opp': games[i][OPPONENT_IND], 'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND]}
+            abridgedStatlines.append(game_dict)
+        seasonStatlines = []
+        for i in range(0, len(games)):
+            game_dict = {'opp': games[i][OPPONENT_IND], 'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND]}
+            seasonStatlines.append(game_dict)
+        return abridgedStatlines, seasonStatlines
 
-    def _getPlayerTotals(self, playerID, numGames):
-        print(playerID)
-        playerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
+    def _getPlayerTotals(self, playerID, numGames, opponent):
+        abridgedPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
                         'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
-        statlines = self._getPlayerStatlines(playerID, numGames)
+        seasonPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
+                        'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
+        versusOpponentPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
+                              'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
+        timesPlayedOpponent = 0
+        abridgedStatlines, seasonStatlines = self._getPlayerStatlines(playerID, numGames)
 
-        for statline in statlines:
-            playerTotals['Points'] += statline['pts']
-            playerTotals['Pts+Rebs+Asts'] += statline['pts']
-            playerTotals['Pts+Rebs'] += statline['pts']
-            playerTotals['Pts+Asts'] += statline['pts']
-            playerTotals['Rebounds'] += statline['rebs']
-            playerTotals['Pts+Rebs'] += statline['rebs']
-            playerTotals['Pts+Rebs+Asts'] += statline['rebs']
-            playerTotals['Rebs+Asts'] += statline['rebs']
-            playerTotals['Assists'] += statline['asts']
-            playerTotals['Pts+Rebs+Asts'] += statline['asts']
-            playerTotals['Pts+Asts'] += statline['asts']
-            playerTotals['Rebs+Asts'] += statline['asts']
+        for statline in abridgedStatlines:
+            abridgedPlayerTotals['Points'] += statline['pts']
+            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
+            abridgedPlayerTotals['Pts+Rebs'] += statline['pts']
+            abridgedPlayerTotals['Pts+Asts'] += statline['pts']
+            abridgedPlayerTotals['Rebounds'] += statline['rebs']
+            abridgedPlayerTotals['Pts+Rebs'] += statline['rebs']
+            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
+            abridgedPlayerTotals['Rebs+Asts'] += statline['rebs']
+            abridgedPlayerTotals['Assists'] += statline['asts']
+            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
+            abridgedPlayerTotals['Pts+Asts'] += statline['asts']
+            abridgedPlayerTotals['Rebs+Asts'] += statline['asts']
 
-        player_totals = {key: value / numGames for key, value in playerTotals.items()}
+        abridged_player_totals = {key: value / numGames for key, value in abridgedPlayerTotals.items()}
 
-        return player_totals
+        for statline in seasonStatlines:
+            seasonPlayerTotals['Points'] += statline['pts']
+            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
+            seasonPlayerTotals['Pts+Rebs'] += statline['pts']
+            seasonPlayerTotals['Pts+Asts'] += statline['pts']
+            seasonPlayerTotals['Rebounds'] += statline['rebs']
+            seasonPlayerTotals['Pts+Rebs'] += statline['rebs']
+            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
+            seasonPlayerTotals['Rebs+Asts'] += statline['rebs']
+            seasonPlayerTotals['Assists'] += statline['asts']
+            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
+            seasonPlayerTotals['Pts+Asts'] += statline['asts']
+            seasonPlayerTotals['Rebs+Asts'] += statline['asts']
+            if opponent in statline['opp']:
+                timesPlayedOpponent += 1
+                versusOpponentPlayerTotals['Points'] += statline['pts']
+                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
+                versusOpponentPlayerTotals['Pts+Rebs'] += statline['pts']
+                versusOpponentPlayerTotals['Pts+Asts'] += statline['pts']
+                versusOpponentPlayerTotals['Rebounds'] += statline['rebs']
+                versusOpponentPlayerTotals['Pts+Rebs'] += statline['rebs']
+                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
+                versusOpponentPlayerTotals['Rebs+Asts'] += statline['rebs']
+                versusOpponentPlayerTotals['Assists'] += statline['asts']
+                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
+                versusOpponentPlayerTotals['Pts+Asts'] += statline['asts']
+                versusOpponentPlayerTotals['Rebs+Asts'] += statline['asts']
+
+
+        season_player_totals = {key: value / len(seasonStatlines) for key, value in seasonPlayerTotals.items()}
+
+        if timesPlayedOpponent != 0:
+            versus_opponent_player_totals = {key: value / timesPlayedOpponent for key, value in versusOpponentPlayerTotals.items()}
+        else:
+            versus_opponent_player_totals = {}
+
+
+        return abridged_player_totals, season_player_totals, versus_opponent_player_totals, timesPlayedOpponent
 
     # betData must be in the format: [(playerID, overNum, category), ...]
     # where overNum is the over/under and category is the statistical combination
     # of the over/under (pts, rebs, asts, pts_asts_rebs, pts_rebs, pts_asts, rebs_asts)
     # betThreshold is a float between 0.0 and 1.0
     def findGoodBets(self, betData, overBetThreshold, underBetThreshold, numGames):
-        goodBetList = []
+        print("Beginning to find \"Good\" Bets.")
+        goodBetListNumGames = []
+        betListAllCategories = []
         for i in range(len(betData)):
-            if i % 10 == 0:
+            if i % 4 == 0:
                 time.sleep(5)
             entry = betData[i]
             playerID = entry['id']
             overNum = float(entry['Over'])
             category = entry['Prop']
+            opponent = entry['Team']
 
-            playerTotals = self._getPlayerTotals(playerID, numGames)
-            playerStat = playerTotals[category]
+            abridgedPlayerTotals, seasonPlayerTotals, versusOpponentPlayerTotals, timesPlayedOpponent = self._getPlayerTotals(playerID, numGames, opponent)
 
-            overageAmount = playerStat / overNum - 1
+            numGamesAverage = abridgedPlayerTotals[category]
 
-            underageAmount = 1 - playerStat / overNum
+            numGamesOverage = numGamesAverage / overNum - 1
 
-            if overageAmount > overBetThreshold:
-                betInfo = [entry['Name'], category, "OVER", round(overageAmount, 3), overNum]
-                goodBetList.append(betInfo)
+            numGamesUnderage = 1 - numGamesAverage / overNum
 
-            if underageAmount > underBetThreshold:
-                betInfo = [entry['Name'], category, "UNDER", round(underageAmount, 3), overNum]
-                goodBetList.append(betInfo)
+            #Calculating good bets considering numGames average only
+            if numGamesOverage > overBetThreshold:
+                betInfo = [entry['Name'], category, "OVER", round(numGamesOverage, 3), overNum]
+                goodBetListNumGames.append(betInfo)
 
-        return goodBetList
+            if numGamesUnderage > underBetThreshold:
+                betInfo = [entry['Name'], category, "UNDER", round(numGamesUnderage, 3), overNum]
+                goodBetListNumGames.append(betInfo)
+
+            #Calculating good bets considering numGames average, season average, and versus opponent average
+            if timesPlayedOpponent != 0:
+                seasonAverage = seasonPlayerTotals[category]
+                versusOpponentAverage = versusOpponentPlayerTotals[category]
+
+                seasonOverage = seasonAverage / overNum - 1
+                versusOpponentOverage = versusOpponentAverage / overNum - 1
+
+                seasonUnderage = 1 - seasonAverage / overNum
+                versusOpponentUnderage = 1 - versusOpponentAverage / overNum
+
+                numGamesOverage *= NUM_GAMES_WEIGHT
+                seasonOverage *= SEASON_WEIGHT
+                versusOpponentOverage *= VERSUS_OPPONENT_WEIGHT
+                totalOverage = numGamesOverage + seasonOverage + versusOpponentOverage
+
+                numGamesUnderage *= NUM_GAMES_WEIGHT
+                seasonUnderage *= SEASON_WEIGHT
+                versusOpponentUnderage *= VERSUS_OPPONENT_WEIGHT
+                totalUnderage = numGamesUnderage + seasonUnderage + versusOpponentUnderage
+
+                if(entry['Name'] == 'Dorian Finney-Smith'):
+                    print('\n' + category)
+                    print(abridgedPlayerTotals)
+                    print(seasonPlayerTotals)
+                    print(versusOpponentPlayerTotals)
+                    print(numGamesOverage)
+                    print(seasonOverage)
+                    print(versusOpponentOverage)
+
+                betInfo = [entry['Name'], category, "OVER", round(totalOverage, 3), overNum]
+                betListAllCategories.append(betInfo)
+                betInfo = [entry['Name'], category, "UNDER", round(totalUnderage, 3), overNum]
+                betListAllCategories.append(betInfo)
+
+            elif timesPlayedOpponent == 0:
+                seasonAverage = seasonPlayerTotals[category]
+
+                seasonOverage = seasonAverage / overNum - 1
+
+                seasonUnderage = 1 - seasonAverage / overNum
+
+                numGamesOverage *= NUM_GAMES_WEIGHT
+                seasonOverage *= SEASON_WEIGHT_NO_OPPONENT
+                totalOverage = numGamesOverage + seasonOverage
+
+                numGamesUnderage *= NUM_GAMES_WEIGHT
+                seasonUnderage *= SEASON_WEIGHT_NO_OPPONENT
+                totalUnderage = numGamesUnderage + seasonUnderage
+
+                betInfo = [entry['Name'], category, "OVER", round(totalOverage, 3), "NO VS. OPP DATA", overNum]
+                betListAllCategories.append(betInfo)
+                betInfo = [entry['Name'], category, "UNDER", round(totalUnderage, 3), "NO VS. OPP DATA", overNum]
+                betListAllCategories.append(betInfo)
+
+
+        sortedGoodBetListNumGames = sorted(goodBetListNumGames, key=lambda x: x[3], reverse=True)
+        print()
+        print(f"BET LIST CONSIDERING {numGames} GAMES BACK AVERAGES WITH A WEIGHT OF 1.0: ")
+        print(sortedGoodBetListNumGames)
+        sortedBetListAllCategories = sorted(betListAllCategories, key=lambda x: x[3], reverse=True)[0:101]
+        print()
+        print(f"BET LIST CONSIDERING {numGames} GAMES BACK WITH WEIGHT {NUM_GAMES_WEIGHT}, SEASON AVERAGE WITH WEIGHT {SEASON_WEIGHT}, VERSUS OPPONENT AVERAGE WITH WEIGHT {VERSUS_OPPONENT_WEIGHT}: ")
+        print(sortedBetListAllCategories)
+        print()
+        return sortedGoodBetListNumGames, sortedBetListAllCategories
 
 
 if __name__ == '__main__':
-    #bets = [['Bam Adebayo', 'Points', 'UNDER', 0.323, 19.5], ['Bogdan Bogdanovic', 'Points', 'OVER', 0.304, 11.5], ['Saddiq Bey', 'Points', 'OVER', 0.368, 9.5], ['Onyeka Okongwu', 'Points', 'OVER', 0.36, 7.5], ['Mike Conley', 'Points', 'OVER', 0.255, 14.5], ['Austin Reaves', 'Points', 'OVER', 0.29, 15.5], ['Rui Hachimura', 'Points', 'OVER', 0.707, 7.5], ['Malik Beasley', 'Points', 'OVER', 0.52, 7.5], ['Scottie Barnes', 'Points', 'UNDER', 0.406, 15.5], ['Coby White', 'Points', 'OVER', 0.453, 9.5], ['Patrick Williams', 'Points', 'OVER', 0.547, 7.5], ['Herbert Jones', 'Points', 'OVER', 0.4, 11.0], ['Dorian Finney-Smith', 'Points', 'OVER', 0.3, 8.0], ['Donovan Mitchell', 'Points', 'OVER', 0.252, 30.5], ['Ivica Zubac', 'Points', 'OVER', 0.352, 10.5], ['Chris Paul', 'Points', 'OVER', 0.289, 13.5], ['Jimmy Butler', 'Rebounds', 'UNDER', 0.486, 7.0], ['Tyler Herro', 'Rebounds', 'UNDER', 0.28, 5.0], ['Austin Reaves', 'Rebounds', 'UNDER', 0.314, 3.5], ['Kyle Anderson', 'Rebounds', 'UNDER', 0.4, 8.0], ['Jarred Vanderbilt', 'Rebounds', 'UNDER', 0.273, 5.5], ['DeMar DeRozan', 'Rebounds', 'UNDER', 0.32, 5.0], ['Scottie Barnes', 'Rebounds', 'UNDER', 0.486, 7.0], ['Luguentz Dort', 'Rebounds', 'OVER', 0.273, 5.5], ['James Harden', 'Rebounds', 'UNDER', 0.4, 6.0], ['Evan Mobley', 'Rebounds', 'OVER', 0.25, 8.0], ['Stephen Curry', 'Rebounds', 'UNDER', 0.267, 6.0], ['Harrison Barnes', 'Rebounds', 'UNDER', 0.4, 4.0], ['Devin Booker', 'Rebounds', 'UNDER', 0.28, 5.0], ['Trae Young', 'Assists', 'OVER', 0.422, 9.0], ['Jimmy Butler', 'Assists', 'OVER', 0.233, 6.0], ['Austin Reaves', 'Assists', 'OVER', 0.35, 4.0], ['Zach LaVine', 'Assists', 'OVER', 0.2, 4.5], ['CJ McCollum', 'Assists', 'UNDER', 0.309, 5.5], ['Spencer Dinwiddie', 'Assists', 'OVER', 0.333, 9.0], ["Royce O'Neale", 'Assists', 'OVER', 0.92, 2.5], ['Devin Booker', 'Assists', 'OVER', 0.28, 5.0], ['Chris Paul', 'Assists', 'UNDER', 0.326, 9.5], ['Bam Adebayo', 'Pts+Rebs+Asts', 'UNDER', 0.275, 32.0], ['Tyler Herro', 'Pts+Rebs+Asts', 'UNDER', 0.261, 29.5], ['Taurean Prince', 'Pts+Rebs+Asts', 'UNDER', 0.282, 19.5], ['Scottie Barnes', 'Pts+Rebs+Asts', 'UNDER', 0.396, 27.5], ['Herbert Jones', 'Pts+Rebs+Asts', 'OVER', 0.243, 18.5], ['Ivica Zubac', 'Pts+Rebs+Asts', 'OVER', 0.22, 20.5], ['Bam Adebayo', 'Pts+Rebs', 'UNDER', 0.295, 29.5], ['Tyler Herro', 'Pts+Rebs', 'UNDER', 0.255, 25.5], ['Bogdan Bogdanovic', 'Pts+Rebs', 'OVER', 0.304, 13.5], ['Saddiq Bey', 'Pts+Rebs', 'OVER', 0.304, 13.5], ['Onyeka Okongwu', 'Pts+Rebs', 'OVER', 0.259, 13.5], ['Rui Hachimura', 'Pts+Rebs', 'OVER', 0.652, 11.5], ['Scottie Barnes', 'Pts+Rebs', 'UNDER', 0.431, 22.5], ['Coby White', 'Pts+Rebs', 'OVER', 0.6, 11.5], ['Patrick Williams', 'Pts+Rebs', 'OVER', 0.505, 10.5], ['Herbert Jones', 'Pts+Rebs', 'OVER', 0.277, 15.5], ['Dorian Finney-Smith', 'Pts+Rebs', 'OVER', 0.248, 12.5], ['Donovan Mitchell', 'Pts+Rebs', 'OVER', 0.252, 34.5], ['Ivica Zubac', 'Pts+Rebs', 'OVER', 0.2, 20.5], ['Bam Adebayo', 'Pts+Asts', 'UNDER', 0.307, 22.5], ['Tyler Herro', 'Pts+Asts', 'UNDER', 0.257, 24.5], ['Bogdan Bogdanovic', 'Pts+Asts', 'OVER', 0.333, 13.5], ['Saddiq Bey', 'Pts+Asts', 'OVER', 0.448, 10.5], ['Austin Reaves', 'Pts+Asts', 'OVER', 0.27, 20.0], ['Taurean Prince', 'Pts+Asts', 'UNDER', 0.29, 15.5], ['Scottie Barnes', 'Pts+Asts', 'UNDER', 0.366, 20.5], ['Coby White', 'Pts+Asts', 'OVER', 0.424, 12.5], ['Herbert Jones', 'Pts+Asts', 'OVER', 0.329, 14.0], ['Ivica Zubac', 'Pts+Asts', 'OVER', 0.27, 11.5], ['Trae Young', 'Rebs+Asts', 'OVER', 0.217, 12.0], ['Scottie Barnes', 'Rebs+Asts', 'UNDER', 0.357, 11.5], ['James Harden', 'Rebs+Asts', 'UNDER', 0.261, 16.5], ['Spencer Dinwiddie', 'Rebs+Asts', 'OVER', 0.296, 12.5], ['Evan Mobley', 'Rebs+Asts', 'OVER', 0.255, 11.0]]
-    #sorted_list = sorted(bets, key = lambda x: x[3], reverse=True)
-    #print(sorted_list)
-
-
     NBAScraper = Scraper()
     betData = NBAScraper.scrapeNBAProps()
+    betAssist = BetAssist()
+    betAssist.findGoodBets(betData, 0.2, 0.25, 5)
 
     '''
     playerIDs = [entry['id'] for entry in betData]
@@ -99,8 +227,3 @@ if __name__ == '__main__':
     response = requests.get(url)
     print(response)
     '''
-
-
-
-    betAssist = BetAssist()
-    print(betAssist.findGoodBets(betData, 0.2, 0.25, 5))

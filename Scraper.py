@@ -46,11 +46,14 @@ class Scraper:
                     names = projections.find_element(By.CLASS_NAME, "name").text
                     pts = projections.find_element(By.CLASS_NAME, "presale-score").get_attribute("textContent")
                     prototype = projections.find_element(By.CLASS_NAME, "text").get_attribute("textContent")
+                    team = projections.find_element(By.CLASS_NAME, "opponent").text
+                    team = team[-3:]
 
                     playerInfo = {
                         'Name': names,
                         'Over': pts,
-                        'Prop': category
+                        'Prop': category,
+                        'Team': team,
                     }
 
                     ppPlayers.append(playerInfo)
@@ -64,4 +67,5 @@ class Scraper:
                 newPlayer['id'] = playerlist[0]['id']
                 ppPlayersTrimmed.append(newPlayer)
 
+        print(f"Scraping done. {str(len(ppPlayersTrimmed))} over/unders found on PrizePicks.")
         return ppPlayersTrimmed
