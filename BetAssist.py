@@ -1,3 +1,4 @@
+# Written by Ethan Roush
 import time
 
 import requests
@@ -216,14 +217,3 @@ if __name__ == '__main__':
     betData = NBAScraper.scrapeNBAProps()
     betAssist = BetAssist()
     betAssist.findGoodBets(betData, 0.2, 0.25, 5)
-
-    '''
-    playerIDs = [entry['id'] for entry in betData]
-    print(len(playerIDs))
-    url = f"https://www.balldontlie.io/api/v1/stats?seasons=2023"
-    for id in playerIDs:
-        url += f"&player_ids[]={str(id)}"
-    print(url)
-    response = requests.get(url)
-    print(response)
-    '''
