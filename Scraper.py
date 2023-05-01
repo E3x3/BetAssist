@@ -33,10 +33,12 @@ class Scraper:
         categories = driver.find_element(By.CSS_SELECTOR, ".stat-container").text.split("\n")
 
         for category in categories:
-            if (category == 'Points' or category == 'Rebounds' or category == 'Assists'
+            if (category == 'Points' or category == 'Rebounds' or category == 'Assists' or category == "3-PT Made"
+                    or category == "FG Attempted" or category == "Personal Fouls" or category == "Free Throws Made"
+                    or category == "Blks+Stls" or category == "Blocked Shots" or category == "Steals" or category == "Turnovers"
                     or category == 'Pts+Rebs+Asts' or category == 'Pts+Rebs'
-                    or category == 'Pts+Asts' or category == 'Rebs+Asts'):
-                print("doing category: " + category)
+                    or category == 'Pts+Asts' or category == 'Rebs+Asts') or category == 'Fantasy Score':
+                print("scraping category: " + category)
                 driver.find_element(By.XPATH, f"//div[text()='{category}']").click()
 
                 projectionsPP = WebDriverWait(driver, 5).until(
@@ -47,14 +49,15 @@ class Scraper:
                     names = projections.find_element(By.CLASS_NAME, "name").text
                     pts = projections.find_element(By.CLASS_NAME, "presale-score").get_attribute("textContent")
                     prototype = projections.find_element(By.CLASS_NAME, "text").get_attribute("textContent")
-                    team = projections.find_element(By.CLASS_NAME, "opponent").text
-                    team = team[-3:]
+                    team = projections.find_element(By.CLASS_NAME, "team-position").text[:3]
+                    opponent = projections.find_element(By.CLASS_NAME, "opponent").text[-3:]
 
                     playerInfo = {
                         'Name': names,
                         'Over': pts,
                         'Prop': category,
                         'Team': team,
+                        'Opponent': opponent,
                     }
 
                     ppPlayers.append(playerInfo)
@@ -65,8 +68,8 @@ class Scraper:
             playerlist = list(players.find_players_by_full_name(player_name))
             if len(playerlist) != 0:
                 newPlayer = player
-                newPlayer['id'] = playerlist[0]['id']
+                newPlayer['Id'] = playerlist[0]['id']
                 ppPlayersTrimmed.append(newPlayer)
 
-        print(f"Scraping done. {str(len(ppPlayersTrimmed))} over/unders found on PrizePicks.")
+        print(f"SCRAPING DONE. {str(len(ppPlayersTrimmed))} player props found on PrizePicks.")
         return ppPlayersTrimmed

@@ -1,9 +1,10 @@
 # Written by Ethan Roush
-import time
+import copy
 
-import requests
 from nba_api.stats.endpoints import playergamelog
 from Scraper import Scraper
+import sys
+import time
 
 # GLOBALS
 OPPONENT_IND = 4
@@ -17,203 +18,261 @@ FGA_IND = 8
 THREE_POINT_MAKE_IND = 10
 TO_IND = 22
 PF_IND = 23
-
-NUM_GAMES_WEIGHT = 0.5
-SEASON_WEIGHT = 0.25
-SEASON_WEIGHT_NO_OPPONENT = 1 - NUM_GAMES_WEIGHT
-VERSUS_OPPONENT_WEIGHT = 0.25
-
+GAME_TYPE_IND = 0
+MIN_IND = 6
 
 class BetAssist:
-    def _getGames(self, playerID):
-        regularSeasonGamelogs = playergamelog.PlayerGameLog(playerID)
-        playoffGameLogs = playergamelog.PlayerGameLog(playerID, season_type_all_star="Playoffs")
-        regularSeasonGames = regularSeasonGamelogs.get_dict()['resultSets'][0]['rowSet']
-        playoffGames = playoffGameLogs.get_dict()['resultSets'][0]['rowSet']
-        playoffGames.extend(regularSeasonGames)
-        return playoffGames
+    includePlayoffs = False
+    playerGames = {}
+    homeTeams = []
+    numAPICalls = 0
 
-    def _getPlayerStatlines(self, playerID, numGames):
+    def __init__(self, includePlayoffs, homeTeams):
+        self.includePlayoffs = includePlayoffs
+        self.playerGames = {}
+        self.homeTeams = homeTeams
+        self.numAPICalls = 0
+
+    def _getGames(self, playerID):
+        if playerID not in self.playerGames:
+            regularSeasonGamelogs = playergamelog.PlayerGameLog(playerID)
+            self.numAPICalls += 1
+            regularSeasonGames = regularSeasonGamelogs.get_dict()['resultSets'][0]['rowSet']
+            if self.includePlayoffs:
+                playoffGameLogs = playergamelog.PlayerGameLog(playerID, season_type_all_star="Playoffs")
+                self.numAPICalls += 1
+                playoffGames = playoffGameLogs.get_dict()['resultSets'][0]['rowSet']
+                playoffGames.extend(regularSeasonGames)
+                self.playerGames[playerID] = playoffGames
+                return playoffGames
+            else:
+                self.playerGames[playerID] = regularSeasonGames
+                return regularSeasonGames
+        else:
+            return self.playerGames[playerID]
+
+
+    def _getPlayerStatlines(self, playerID):
         games = self._getGames(playerID)
-        abridgedStatlines = []
-        for i in range(0, numGames):
-            game_dict = {'opp': games[i][OPPONENT_IND], 'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND]}
-            abridgedStatlines.append(game_dict)
         seasonStatlines = []
         for i in range(0, len(games)):
-            game_dict = {'opp': games[i][OPPONENT_IND], 'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND]}
+
+            isHomeGame = True
+            if '@' in games[i][OPPONENT_IND]:
+                isHomeGame = False
+
+            isPlayoffGame = False
+            if games[i][GAME_TYPE_IND] == '42022':
+                isPlayoffGame = True
+
+            game_dict = {'opp': games[i][OPPONENT_IND][-3:], 'min': games[i][MIN_IND],'home': isHomeGame, 'playoff': isPlayoffGame,
+                         'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND],
+                         '3pm': games[i][THREE_POINT_MAKE_IND], 'stls': games[i][STEAL_IND],
+                         'blks': games[i][BLOCK_IND], 'fga': games[i][FGA_IND], 'tos': games[i][TO_IND],
+                         'pfs': games[i][PF_IND], 'ftm': games[i][FTM_IND]}
+
             seasonStatlines.append(game_dict)
-        return abridgedStatlines, seasonStatlines
 
-    def _getPlayerTotals(self, playerID, numGames, opponent):
-        abridgedPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
-                        'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
-        seasonPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
-                        'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
-        versusOpponentPlayerTotals = {'Points': 0.0, 'Rebounds': 0.0, 'Assists': 0.0, 'Pts+Rebs+Asts': 0.0, 'Pts+Rebs': 0.0,
-                              'Pts+Asts': 0.0, 'Rebs+Asts': 0.0}
-        timesPlayedOpponent = 0
-        abridgedStatlines, seasonStatlines = self._getPlayerStatlines(playerID, numGames)
+        return seasonStatlines
 
-        for statline in abridgedStatlines:
-            abridgedPlayerTotals['Points'] += statline['pts']
-            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
-            abridgedPlayerTotals['Pts+Rebs'] += statline['pts']
-            abridgedPlayerTotals['Pts+Asts'] += statline['pts']
-            abridgedPlayerTotals['Rebounds'] += statline['rebs']
-            abridgedPlayerTotals['Pts+Rebs'] += statline['rebs']
-            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
-            abridgedPlayerTotals['Rebs+Asts'] += statline['rebs']
-            abridgedPlayerTotals['Assists'] += statline['asts']
-            abridgedPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
-            abridgedPlayerTotals['Pts+Asts'] += statline['asts']
-            abridgedPlayerTotals['Rebs+Asts'] += statline['asts']
+    def _calculateHitPercentage(self, statlines, overAmnt, category):
+        numHits = 0
+        totalMin = 0
+        for statline in statlines:
+            pts = statline['pts']
+            asts = statline['asts']
+            rebs = statline['rebs']
+            threePointMakes = statline['3pm']
+            stls = statline['stls']
+            blks = statline['blks']
+            fga = statline['fga']
+            tos = statline['tos']
+            pfs = statline['pfs']
+            ftm = statline['ftm']
+            min = statline['min']
 
-        abridged_player_totals = {key: value / numGames for key, value in abridgedPlayerTotals.items()}
+            totalMin += min
+            fantasyScore = pts + (1.2 * rebs) + (1.5 * asts) + (3 * blks) + (3 * stls) + (-1 * tos)
+            if category == 'Points' and pts >= overAmnt:
+                numHits += 1
+            elif category == 'Rebounds' and rebs >= overAmnt:
+                numHits += 1
+            elif category == 'Assists' and asts >= overAmnt:
+                numHits += 1
+            elif category == 'Pts+Rebs+Asts' and (pts + rebs + asts) >= overAmnt:
+                numHits += 1
+            elif category == 'Pts+Rebs' and (pts + rebs) >= overAmnt:
+                numHits += 1
+            elif category == 'Pts+Asts' and (pts + asts) >= overAmnt:
+                numHits += 1
+            elif category == 'Rebs+Asts' and (rebs + asts) >= overAmnt:
+                numHits += 1
+            elif category == '3-PT Made' and threePointMakes > overAmnt:
+                numHits += 1
+            elif category == 'Blks+Stls' and (blks + stls) >= overAmnt:
+                numHits += 1
+            elif category == 'Blocked Shots' and blks >= overAmnt:
+                numHits += 1
+            elif category == 'Steals' and stls > overAmnt:
+                numHits += 1
+            elif category == 'Turnovers' and tos > overAmnt:
+                numHits += 1
+            elif category == 'Free Throws Made' and ftm > overAmnt:
+                numHits += 1
+            elif category == 'FG Attempted' and fga >= overAmnt:
+                numHits += 1
+            elif category == 'Personal Fouls' and pfs > overAmnt:
+                numHits += 1
+            elif category == 'Fantasy Score' and fantasyScore >= overAmnt:
+                numHits += 1
 
-        for statline in seasonStatlines:
-            seasonPlayerTotals['Points'] += statline['pts']
-            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
-            seasonPlayerTotals['Pts+Rebs'] += statline['pts']
-            seasonPlayerTotals['Pts+Asts'] += statline['pts']
-            seasonPlayerTotals['Rebounds'] += statline['rebs']
-            seasonPlayerTotals['Pts+Rebs'] += statline['rebs']
-            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
-            seasonPlayerTotals['Rebs+Asts'] += statline['rebs']
-            seasonPlayerTotals['Assists'] += statline['asts']
-            seasonPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
-            seasonPlayerTotals['Pts+Asts'] += statline['asts']
-            seasonPlayerTotals['Rebs+Asts'] += statline['asts']
-            if opponent in statline['opp']:
-                timesPlayedOpponent += 1
-                versusOpponentPlayerTotals['Points'] += statline['pts']
-                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['pts']
-                versusOpponentPlayerTotals['Pts+Rebs'] += statline['pts']
-                versusOpponentPlayerTotals['Pts+Asts'] += statline['pts']
-                versusOpponentPlayerTotals['Rebounds'] += statline['rebs']
-                versusOpponentPlayerTotals['Pts+Rebs'] += statline['rebs']
-                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['rebs']
-                versusOpponentPlayerTotals['Rebs+Asts'] += statline['rebs']
-                versusOpponentPlayerTotals['Assists'] += statline['asts']
-                versusOpponentPlayerTotals['Pts+Rebs+Asts'] += statline['asts']
-                versusOpponentPlayerTotals['Pts+Asts'] += statline['asts']
-                versusOpponentPlayerTotals['Rebs+Asts'] += statline['asts']
-
-
-        season_player_totals = {key: value / len(seasonStatlines) for key, value in seasonPlayerTotals.items()}
-
-        if timesPlayedOpponent != 0:
-            versus_opponent_player_totals = {key: value / timesPlayedOpponent for key, value in versusOpponentPlayerTotals.items()}
-        else:
-            versus_opponent_player_totals = {}
+        avgMin = totalMin / len(statlines) if len(statlines) != 0 else 0
+        return ((numHits / len(statlines)), avgMin) if len(statlines) != 0 else ('N/A', avgMin)
 
 
-        return abridged_player_totals, season_player_totals, versus_opponent_player_totals, timesPlayedOpponent
-
-    # betData must be in the format: [(playerID, overNum, category), ...]
-    # where overNum is the over/under and category is the statistical combination
-    # of the over/under (pts, rebs, asts, pts_asts_rebs, pts_rebs, pts_asts, rebs_asts)
-    # betThreshold is a float between 0.0 and 1.0
-    def findGoodBets(self, betData, overBetThreshold, underBetThreshold, numGames):
-        print("Beginning to find \"Good\" Bets.")
-        goodBetListNumGames = []
-        betListAllCategories = []
+    def _printBets(self, betList):
+        for entry in betList:
+            print(f'\nName: {entry["Name"]}\nTeam: {entry["Team"]}\nProp: Hit {entry["Over"]} {entry["Prop"]}\nTotal Hit %: *** {entry["TotalHitPercentage"]} ***')
+            for k, v in entry['HitPercentagesPrintableDict'].items():
+                if v != 'N/A':
+                    print(f'-{k}: {v}')
+    def findGoodBets(self, betData):
+        print("Finding Good Bets.")
+        betList = []
+        startTime = time.time()
         for i in range(len(betData)):
-            if i % 4 == 0:
+
+            # necessary so API calls for game data do not cause HTTP Timeout
+            if self.numAPICalls % 8 == 0:
                 time.sleep(5)
+
+            if i % 30 == 0:
+                elapsedTime = time.time() - startTime
+                print(f'{i}/{len(betData)} player props analyzed. {elapsedTime:.2f} seconds elapsed')
+
             entry = betData[i]
-            playerID = entry['id']
-            overNum = float(entry['Over'])
+            playerName = entry['Name']
+            playerID = entry['Id']
+            overAmnt = float(entry['Over'])
             category = entry['Prop']
-            opponent = entry['Team']
+            team = entry['Team']
+            opponent = entry['Opponent']
+            entry['AvgMinOverLastFiveGames'] = 0
+            entry['Risky'] = False
 
-            abridgedPlayerTotals, seasonPlayerTotals, versusOpponentPlayerTotals, timesPlayedOpponent = self._getPlayerTotals(playerID, numGames, opponent)
+            games = self._getPlayerStatlines(playerID)
 
-            numGamesAverage = abridgedPlayerTotals[category]
-
-            numGamesOverage = numGamesAverage / overNum - 1
-
-            numGamesUnderage = 1 - numGamesAverage / overNum
-
-            #Calculating good bets considering numGames average only
-            if numGamesOverage > overBetThreshold:
-                betInfo = [entry['Name'], category, "OVER", round(numGamesOverage, 3), overNum]
-                goodBetListNumGames.append(betInfo)
-
-            if numGamesUnderage > underBetThreshold:
-                betInfo = [entry['Name'], category, "UNDER", round(numGamesUnderage, 3), overNum]
-                goodBetListNumGames.append(betInfo)
-
-            #Calculating good bets considering numGames average, season average, and versus opponent average
-            if timesPlayedOpponent != 0:
-                seasonAverage = seasonPlayerTotals[category]
-                versusOpponentAverage = versusOpponentPlayerTotals[category]
-
-                seasonOverage = seasonAverage / overNum - 1
-                versusOpponentOverage = versusOpponentAverage / overNum - 1
-
-                seasonUnderage = 1 - seasonAverage / overNum
-                versusOpponentUnderage = 1 - versusOpponentAverage / overNum
-
-                numGamesOverage *= NUM_GAMES_WEIGHT
-                seasonOverage *= SEASON_WEIGHT
-                versusOpponentOverage *= VERSUS_OPPONENT_WEIGHT
-                totalOverage = numGamesOverage + seasonOverage + versusOpponentOverage
-
-                numGamesUnderage *= NUM_GAMES_WEIGHT
-                seasonUnderage *= SEASON_WEIGHT
-                versusOpponentUnderage *= VERSUS_OPPONENT_WEIGHT
-                totalUnderage = numGamesUnderage + seasonUnderage + versusOpponentUnderage
-
-                if(entry['Name'] == 'Dorian Finney-Smith'):
-                    print('\n' + category)
-                    print(abridgedPlayerTotals)
-                    print(seasonPlayerTotals)
-                    print(versusOpponentPlayerTotals)
-                    print(numGamesOverage)
-                    print(seasonOverage)
-                    print(versusOpponentOverage)
-
-                betInfo = [entry['Name'], category, "OVER", round(totalOverage, 3), overNum]
-                betListAllCategories.append(betInfo)
-                betInfo = [entry['Name'], category, "UNDER", round(totalUnderage, 3), overNum]
-                betListAllCategories.append(betInfo)
-
-            elif timesPlayedOpponent == 0:
-                seasonAverage = seasonPlayerTotals[category]
-
-                seasonOverage = seasonAverage / overNum - 1
-
-                seasonUnderage = 1 - seasonAverage / overNum
-
-                numGamesOverage *= NUM_GAMES_WEIGHT
-                seasonOverage *= SEASON_WEIGHT_NO_OPPONENT
-                totalOverage = numGamesOverage + seasonOverage
-
-                numGamesUnderage *= NUM_GAMES_WEIGHT
-                seasonUnderage *= SEASON_WEIGHT_NO_OPPONENT
-                totalUnderage = numGamesUnderage + seasonUnderage
-
-                betInfo = [entry['Name'], category, "OVER", round(totalOverage, 3), "NO VS. OPP DATA", overNum]
-                betListAllCategories.append(betInfo)
-                betInfo = [entry['Name'], category, "UNDER", round(totalUnderage, 3), "NO VS. OPP DATA", overNum]
-                betListAllCategories.append(betInfo)
+            lastFiveGames = [games[i] for i in range(len(games)) if i <= 4]
+            lastTenGames = [games[i] for i in range(len(games)) if i <= 9]
+            lastFifteenGames = [games[i] for i in range(len(games)) if i <= 14]
+            versusOpponentGames = [games[i] for i in range(len(games)) if
+                                   games[i]['opp'].upper() == opponent.upper() or games[i][
+                                       'opp'].upper() in opponent.upper()]
+            homeGames = []
+            awayGames = []
+            if team.upper() in self.homeTeams and self.homeTeams:
+                homeGames = [games[i] for i in range(len(games)) if games[i]['home'] is True]
+            elif team.upper() not in self.homeTeams and self.homeTeams:
+                awayGames = [games[i] for i in range(len(games)) if games[i]['home'] is False]
+            playoffGames = []
+            if self.includePlayoffs:
+                playoffGames = [games[i] for i in range(len(games)) if games[i]['playoff'] == True]
 
 
-        sortedGoodBetListNumGames = sorted(goodBetListNumGames, key=lambda x: x[3], reverse=True)
-        print()
-        print(f"BET LIST CONSIDERING {numGames} GAMES BACK AVERAGES WITH A WEIGHT OF 1.0: ")
-        print(sortedGoodBetListNumGames)
-        sortedBetListAllCategories = sorted(betListAllCategories, key=lambda x: x[3], reverse=True)[0:101]
-        print()
-        print(f"BET LIST CONSIDERING {numGames} GAMES BACK WITH WEIGHT {NUM_GAMES_WEIGHT}, SEASON AVERAGE WITH WEIGHT {SEASON_WEIGHT}, VERSUS OPPONENT AVERAGE WITH WEIGHT {VERSUS_OPPONENT_WEIGHT}: ")
-        print(sortedBetListAllCategories)
-        print()
-        return sortedGoodBetListNumGames, sortedBetListAllCategories
+            lastFiveGamesHitPercentage, avgMinOverLastFiveGames = self._calculateHitPercentage(lastFiveGames, overAmnt, category)[0], self._calculateHitPercentage(lastFiveGames, overAmnt, category)[1]
+            lastTenGamesHitPercentage = self._calculateHitPercentage(lastTenGames, overAmnt, category)[0]
+            lastFifteenGamesHitPercentage = self._calculateHitPercentage(lastFifteenGames, overAmnt, category)[0]
+            versusOpponentGamesHitPercentage = self._calculateHitPercentage(versusOpponentGames, overAmnt, category)[0]
+            homeGamesHitPercentage = self._calculateHitPercentage(homeGames, overAmnt, category)[0]
+            awayGamesHitPercentage = self._calculateHitPercentage(awayGames, overAmnt, category)[0]
+            playoffGamesHitPercentage = self._calculateHitPercentage(playoffGames, overAmnt, category)[0]
+            gamesHitPercentage = self._calculateHitPercentage(games, overAmnt, category)[0]
+
+            entry['AvgMinOverLastFiveGames'] = avgMinOverLastFiveGames
+
+            hitPercentages = [lastFiveGamesHitPercentage, lastTenGamesHitPercentage, lastFifteenGamesHitPercentage, versusOpponentGamesHitPercentage,
+                              gamesHitPercentage, homeGamesHitPercentage, awayGamesHitPercentage, playoffGamesHitPercentage]
+            totalHitPercentage = sum([float(pct) for pct in hitPercentages if pct != 'N/A']) / len([pct for pct in hitPercentages if pct != 'N/A'])
+
+            hitPercentagesPrintableDict = {'Last Five Games': lastFiveGamesHitPercentage, 'Last Ten Games': lastTenGamesHitPercentage,
+                                           'Last Fifteen Games': lastFifteenGamesHitPercentage, f'Against {opponent}': versusOpponentGamesHitPercentage,
+                                           'Season Average': gamesHitPercentage,
+                                           'Home Games': homeGamesHitPercentage, 'Away Games': awayGamesHitPercentage,
+                                           'Playoffs': playoffGamesHitPercentage}
+            roundedDict = {k: round(float(v), 3) if v != 'N/A' else v for k, v in hitPercentagesPrintableDict.items()}
+
+
+            entry['TotalHitPercentage'] = round(totalHitPercentage, 3)
+            entry['HitPercentagesPrintableDict'] = roundedDict
+
+            betList.append(entry)
+
+        elapsedTime = time.time() - startTime
+        print(f'{len(betData)}/{len(betData)} player props analyzed. {elapsedTime:.2f} total seconds elapsed')
+
+        sortedBetList = sorted(betList, key=lambda x: x['TotalHitPercentage'], reverse=True)
+
+        topNoRiskBets = []
+        topRiskyBets = []
+        for entry in copy.deepcopy(sortedBetList):
+            if entry['HitPercentagesPrintableDict']['Last Five Games'] < 0.6 or entry['AvgMinOverLastFiveGames'] < 25:
+                entry['Risky'] = True
+
+            if entry['Risky'] is False and len(topNoRiskBets) < 30:
+                topNoRiskBets.append(entry)
+            elif entry['Risky'] is True and len(topRiskyBets) < 15:
+                topRiskyBets.append(entry)
+
+            if len(topNoRiskBets) == 30 and len(topNoRiskBets) == 15:
+                break
+
+        bottomNoRiskBets = []
+        bottomRiskyBets = []
+        for entry in reversed(copy.deepcopy(sortedBetList)):
+            if entry['AvgMinOverLastFiveGames'] < 25:
+                entry['Risky'] = True
+
+            if entry['Risky'] is False and len(bottomNoRiskBets) < 20:
+                bottomNoRiskBets.append(entry)
+            elif entry['Risky'] is True and len(bottomRiskyBets) < 15:
+                bottomRiskyBets.append(entry)
+
+            if len(bottomNoRiskBets) == 20 and len(bottomRiskyBets) == 15:
+                break
+
+        print('\n-----------TOP 30 NON-RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
+
+        self._printBets(topNoRiskBets)
+
+        print('\n-----------TOP 15 RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
+
+        self._printBets(topRiskyBets)
+
+        print('\n-----------BOTTOM 20 NON-RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
+
+        self._printBets(bottomNoRiskBets)
+
+        print('\n-----------BOTTOM 15 RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
+
+        self._printBets(bottomRiskyBets)
 
 
 if __name__ == '__main__':
+    homeTeams = input("Enter three-letter home teams separated by commas. Press enter for no Home/Away data. Ex: NYK, MIA, BOS\n").split(",")
+    homeTeams = [team.strip().upper() for team in homeTeams]
+    gamesToConsider = input("Enter games to consider by entering at least one of the teams playing in game. Press enter to consider all. Ex: NYK, BOS\n").split(",")
+    gamesToConsider = [team.strip().upper() for team in gamesToConsider]
     NBAScraper = Scraper()
-    betData = NBAScraper.scrapeNBAProps()
-    betAssist = BetAssist()
-    betAssist.findGoodBets(betData, 0.2, 0.25, 5)
+    nonPrunedBetData = NBAScraper.scrapeNBAProps()
+
+    prunedBetData = []
+    for entry in nonPrunedBetData:
+        if entry['Team'] in gamesToConsider or entry['Opponent'] in gamesToConsider:
+            prunedBetData.append(entry)
+
+    if len(sys.argv[1]) > 1 and sys.argv[1] == '--playoffs':
+        betAssist = BetAssist(True, homeTeams)
+        betAssist.findGoodBets(prunedBetData)
+    else:
+        betAssist = BetAssist(False, homeTeams)
+        betAssist.findGoodBets(prunedBetData)
