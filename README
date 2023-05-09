@@ -4,10 +4,10 @@ If you don't have any of the modules, pip install them
 
 
 Run with playoffs included: 
-python3 BetAssist.py --playoffs
+python3.11 BetAssist.py --playoffs
 
 Run without playoffs included: 
-python3 BetAssist.py
+python3.11 BetAssist.py
 
 
 
