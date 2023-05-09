@@ -2,6 +2,8 @@
 import copy
 
 from nba_api.stats.endpoints import playergamelog
+
+#from MongoPersister import MongoPersister
 from Scraper import Scraper
 import sys
 import time
@@ -20,6 +22,8 @@ TO_IND = 22
 PF_IND = 23
 GAME_TYPE_IND = 0
 MIN_IND = 6
+
+NUM_MULTI_PLAYERS = 2
 
 class BetAssist:
     includePlayoffs = False
@@ -109,9 +113,9 @@ class BetAssist:
                 numHits += 1
             elif category == '3-PT Made' and threePointMakes > overAmnt:
                 numHits += 1
-            elif category == 'Blks+Stls' and (blks + stls) >= overAmnt:
+            elif category == 'Blks+Stls' and (blks + stls) > overAmnt:
                 numHits += 1
-            elif category == 'Blocked Shots' and blks >= overAmnt:
+            elif category == 'Blocked Shots' and blks > overAmnt:
                 numHits += 1
             elif category == 'Steals' and stls > overAmnt:
                 numHits += 1
@@ -136,6 +140,52 @@ class BetAssist:
             for k, v in entry['HitPercentagesPrintableDict'].items():
                 if v != 'N/A':
                     print(f'-{k}: {v}')
+
+    def _checkOccurences(self, id, betList):
+        count = 0
+        for entry in betList:
+            if entry['Id'] == id:
+                count+=1
+        return count
+
+    '''
+    def _persistToDatabase(self, entries):
+        persister = MongoPersister()
+        persister.connectClient()
+        
+        #DBBets return format: [{'_id', 'Id', 'Name', 'Date', 'Over', 'Decision',  ...} ]
+        dbBets = persister.readAll()
+
+        unpersistedBets = []
+        for entry in entries:
+            unpersistedBet = {}
+            unpersistedBetId = entry['Id']
+            unpersistedBetName = entry['Name']
+            unpersistedBetDate = entry['Date']
+            unpersistedBetOver = float(entry['Over'])
+            unpersistedBetCategory = entry['Prop']
+            unpersistedBetTotalHitPercentage = entry['TotalHitPercentage']
+            unpersistedBetHitPercentagesPrintableDict = entry['HitPercentagesPrintableDict']
+            unpersistedBetDecision = entry['Decision']
+            unpersistedBetTeam = entry['Team']
+            unpersistedBetRisk = 'Y' if entry['Risky'] else 'N'
+
+            alreadyInDB = False
+            for dbBet in dbBets:
+                if dbBet['Id'] == unpersistedBetId and dbBet['Date'] == unpersistedBetDate and dbBet['Prop'] == unpersistedBetCategory \
+                    and dbBet['Over'] == unpersistedBetOver and dbBet['Decision'] == unpersistedBetDecision:
+                    alreadyInDB = True
+
+            if not alreadyInDB:
+                unpersistedBets.append({'Id': unpersistedBetId, 'Name': unpersistedBetName, 'Date': unpersistedBetDate,
+                                        'TotalHitPercentage': unpersistedBetTotalHitPercentage,
+                                        'Prop': unpersistedBetCategory, 'HitPercentagesPrintableDict': unpersistedBetHitPercentagesPrintableDict,
+                                        'Over': unpersistedBetOver, 'Decision': unpersistedBetDecision, 'Risky': unpersistedBetRisk, 'Team': unpersistedBetTeam})
+
+        persister.batchWrite(unpersistedBets)
+        '''
+
+
     def findGoodBets(self, betData):
         print("Finding Good Bets.")
         betList = []
@@ -218,56 +268,69 @@ class BetAssist:
             if entry['HitPercentagesPrintableDict']['Last Five Games'] < 0.6 or entry['AvgMinOverLastFiveGames'] < 25:
                 entry['Risky'] = True
 
-            if entry['Risky'] is False and len(topNoRiskBets) < 30:
+            if entry['Risky'] is False and len(topNoRiskBets) < 20 \
+                    and self._checkOccurences(entry['Id'], topNoRiskBets) < NUM_MULTI_PLAYERS and entry['TotalHitPercentage'] >= 0.57:
+                entry['Decision'] =  'Over'
                 topNoRiskBets.append(entry)
-            elif entry['Risky'] is True and len(topRiskyBets) < 15:
+            elif entry['Risky'] is True and len(topRiskyBets) < 8 \
+                    and self._checkOccurences(entry['Id'], topRiskyBets) < NUM_MULTI_PLAYERS and entry['TotalHitPercentage'] >= 0.57:
+                entry['Decision'] =  'Over'
                 topRiskyBets.append(entry)
 
-            if len(topNoRiskBets) == 30 and len(topNoRiskBets) == 15:
+            if len(topNoRiskBets) == 20 and len(topNoRiskBets) == 8:
                 break
 
         bottomNoRiskBets = []
         bottomRiskyBets = []
         for entry in reversed(copy.deepcopy(sortedBetList)):
-            if entry['AvgMinOverLastFiveGames'] < 25:
+            if entry['AvgMinOverLastFiveGames'] < 25 or entry['HitPercentagesPrintableDict']['Last Five Games'] > 0.4:
                 entry['Risky'] = True
 
-            if entry['Risky'] is False and len(bottomNoRiskBets) < 20:
+            if entry['Risky'] is False and len(bottomNoRiskBets) < 10 \
+                    and self._checkOccurences(entry['Id'], bottomNoRiskBets) < NUM_MULTI_PLAYERS and entry['TotalHitPercentage'] <= 0.43:
+                entry['Decision'] =  'Under'
                 bottomNoRiskBets.append(entry)
-            elif entry['Risky'] is True and len(bottomRiskyBets) < 15:
+            elif entry['Risky'] is True and len(bottomRiskyBets) < 3 \
+                    and self._checkOccurences(entry['Id'], bottomRiskyBets) < NUM_MULTI_PLAYERS and entry['TotalHitPercentage'] <= 0.43:
+                entry['Decision'] =  'Under'
                 bottomRiskyBets.append(entry)
 
-            if len(bottomNoRiskBets) == 20 and len(bottomRiskyBets) == 15:
+            if len(bottomNoRiskBets) == 10 and len(bottomRiskyBets) == 3:
                 break
 
-        print('\n-----------TOP 30 NON-RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
+        '''
+        try:
+            self._persistToDatabase(topRiskyBets + topNoRiskBets + bottomNoRiskBets + bottomRiskyBets)
+        except Exception as e:
+            print("Error with database persistence: " + str(e))
+        '''
+
+        print('\n-----------NON-RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
 
         self._printBets(topNoRiskBets)
 
-        print('\n-----------TOP 15 RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
+        print('\n-----------RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
 
         self._printBets(topRiskyBets)
 
-        print('\n-----------BOTTOM 20 NON-RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
+        print('\n-----------NON-RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
 
         self._printBets(bottomNoRiskBets)
 
-        print('\n-----------BOTTOM 15 RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
+        print('\n-----------RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
 
         self._printBets(bottomRiskyBets)
 
 
 if __name__ == '__main__':
-    homeTeams = input("Enter three-letter home teams separated by commas. Press enter for no Home/Away data. Ex: NYK, MIA, BOS\n").split(",")
+    homeTeams = input("Enter three-letter home teams separated by commas.\nOnly the games these teams are playing will be considered in the output.\nExample input format: NYK, MIA, BOS\n").split(",")
     homeTeams = [team.strip().upper() for team in homeTeams]
-    gamesToConsider = input("Enter games to consider by entering at least one of the teams playing in game. Press enter to consider all. Ex: NYK, BOS\n").split(",")
-    gamesToConsider = [team.strip().upper() for team in gamesToConsider]
     NBAScraper = Scraper()
     nonPrunedBetData = NBAScraper.scrapeNBAProps()
 
     prunedBetData = []
     for entry in nonPrunedBetData:
-        if entry['Team'] in gamesToConsider or entry['Opponent'] in gamesToConsider:
+        if entry['Team'] in homeTeams or entry['Opponent'] in homeTeams:
             prunedBetData.append(entry)
 
     if len(sys.argv[1]) > 1 and sys.argv[1] == '--playoffs':

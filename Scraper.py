@@ -8,6 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import pandas as pd
 from nba_api.stats.static import players
+import datetime
 
 
 class Scraper:
@@ -51,6 +52,8 @@ class Scraper:
                     prototype = projections.find_element(By.CLASS_NAME, "text").get_attribute("textContent")
                     team = projections.find_element(By.CLASS_NAME, "team-position").text[:3]
                     opponent = projections.find_element(By.CLASS_NAME, "opponent").text[-3:]
+                    current_date = datetime.date.today()
+                    formatted_date = current_date.strftime("%m/%d/%Y")
 
                     playerInfo = {
                         'Name': names,
@@ -58,6 +61,7 @@ class Scraper:
                         'Prop': category,
                         'Team': team,
                         'Opponent': opponent,
+                        'Date': formatted_date
                     }
 
                     ppPlayers.append(playerInfo)
