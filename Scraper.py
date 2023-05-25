@@ -1,5 +1,4 @@
 # https://www.actowizsolutions.com/scrape-sports-betting-props-from-prizepicks.php
-# Written by Ethan Roush
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -8,18 +7,19 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import pandas as pd
 from nba_api.stats.static import players
+import undetected_chromedriver as uc
 import datetime
 
 
 class Scraper:
     def scrapeNBAProps(self):
-        PATH = "/Users/ethanroush/Documents/chromedriver_mac64/chromedriver"
-        driver = webdriver.Chrome(PATH)
-
+        
+        options = webdriver.ChromeOptions()
+        driver = uc.Chrome(options=options)
         driver.get("https://app.prizepicks.com/")
 
         # wait = WebDriverWait(driver, 15).until(EC.presence_of_element_located(By.C))
-        time.sleep(1)
+        time.sleep(5)
         driver.find_element(By.XPATH, "/html/body/div[2]/div[3]/div/div/div[3]/button").click()
         time.sleep(1)
 

@@ -8,6 +8,8 @@ from Scraper import Scraper
 import sys
 import time
 
+from constants import BET_ASSIST_URI, BET_ASSIST_DB_COLLECTION, BET_ASSIST_DB_NAME
+
 # GLOBALS
 OPPONENT_IND = 4
 POINT_IND = 24
@@ -111,21 +113,21 @@ class BetAssist:
                 numHits += 1
             elif category == 'Rebs+Asts' and (rebs + asts) >= overAmnt:
                 numHits += 1
-            elif category == '3-PT Made' and threePointMakes > overAmnt:
+            elif category == '3-PT Made' and threePointMakes >= overAmnt:
                 numHits += 1
-            elif category == 'Blks+Stls' and (blks + stls) > overAmnt:
+            elif category == 'Blks+Stls' and (blks + stls) >= overAmnt:
                 numHits += 1
-            elif category == 'Blocked Shots' and blks > overAmnt:
+            elif category == 'Blocked Shots' and blks >= overAmnt:
                 numHits += 1
-            elif category == 'Steals' and stls > overAmnt:
+            elif category == 'Steals' and stls >= overAmnt:
                 numHits += 1
-            elif category == 'Turnovers' and tos > overAmnt:
+            elif category == 'Turnovers' and tos >= overAmnt:
                 numHits += 1
-            elif category == 'Free Throws Made' and ftm > overAmnt:
+            elif category == 'Free Throws Made' and ftm >= overAmnt:
                 numHits += 1
             elif category == 'FG Attempted' and fga >= overAmnt:
                 numHits += 1
-            elif category == 'Personal Fouls' and pfs > overAmnt:
+            elif category == 'Personal Fouls' and pfs >= overAmnt:
                 numHits += 1
             elif category == 'Fantasy Score' and fantasyScore >= overAmnt:
                 numHits += 1
@@ -148,9 +150,9 @@ class BetAssist:
                 count+=1
         return count
 
-    '''
+    """
     def _persistToDatabase(self, entries):
-        persister = MongoPersister()
+        persister = MongoPersister(BET_ASSIST_URI, BET_ASSIST_DB_NAME, BET_ASSIST_DB_COLLECTION)
         persister.connectClient()
         
         #DBBets return format: [{'_id', 'Id', 'Name', 'Date', 'Over', 'Decision',  ...} ]
@@ -169,6 +171,7 @@ class BetAssist:
             unpersistedBetDecision = entry['Decision']
             unpersistedBetTeam = entry['Team']
             unpersistedBetRisk = 'Y' if entry['Risky'] else 'N'
+            unpersistedBetLowFrequency = entry['LowFrequency']
 
             alreadyInDB = False
             for dbBet in dbBets:
@@ -180,10 +183,12 @@ class BetAssist:
                 unpersistedBets.append({'Id': unpersistedBetId, 'Name': unpersistedBetName, 'Date': unpersistedBetDate,
                                         'TotalHitPercentage': unpersistedBetTotalHitPercentage,
                                         'Prop': unpersistedBetCategory, 'HitPercentagesPrintableDict': unpersistedBetHitPercentagesPrintableDict,
-                                        'Over': unpersistedBetOver, 'Decision': unpersistedBetDecision, 'Risky': unpersistedBetRisk, 'Team': unpersistedBetTeam})
+                                        'Over': unpersistedBetOver, 'Decision': unpersistedBetDecision, 'Risky': unpersistedBetRisk, 'Team': unpersistedBetTeam,
+                                        'LowFrequency': unpersistedBetLowFrequency})
 
         persister.batchWrite(unpersistedBets)
-        '''
+        """
+
 
 
     def findGoodBets(self, betData):
@@ -209,6 +214,12 @@ class BetAssist:
             opponent = entry['Opponent']
             entry['AvgMinOverLastFiveGames'] = 0
             entry['Risky'] = False
+            entry['LowFrequency'] = 'N'
+            if category == '3-PT Made' or category == 'Blks+Stls' or category == 'Blocked Shots' \
+                or category == 'Steals' or category == 'Turnovers' or category == 'Free Throws Made' \
+                or category == 'Personal Fouls':
+                    entry['LowFrequency'] = 'Y'
+
 
             games = self._getPlayerStatlines(playerID)
 
@@ -298,12 +309,13 @@ class BetAssist:
             if len(bottomNoRiskBets) == 10 and len(bottomRiskyBets) == 3:
                 break
 
-        '''
+        """
         try:
             self._persistToDatabase(topRiskyBets + topNoRiskBets + bottomNoRiskBets + bottomRiskyBets)
         except Exception as e:
             print("Error with database persistence: " + str(e))
-        '''
+        """
+
 
         print('\n-----------NON-RISKY BETS WITH HIGHEST HIT PERCENTAGES (OVERS)-----------')
 
@@ -333,7 +345,7 @@ if __name__ == '__main__':
         if entry['Team'] in homeTeams or entry['Opponent'] in homeTeams:
             prunedBetData.append(entry)
 
-    if len(sys.argv[1]) > 1 and sys.argv[1] == '--playoffs':
+    if len(sys.argv) > 1 and sys.argv[1] == '--playoffs':
         betAssist = BetAssist(True, homeTeams)
         betAssist.findGoodBets(prunedBetData)
     else:
