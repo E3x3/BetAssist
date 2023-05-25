@@ -1,5 +1,4 @@
 Requires selenium and chrome driver
-** Must change PATH variable in Scraper class to match your Selenium chrome driver path **
 If you don't have any of the modules, pip install them
 Must install modules and run with Python 3.11 (without database features, could run with Python 3.9 and above)
 
