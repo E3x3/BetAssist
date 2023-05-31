@@ -7,10 +7,10 @@
 
 # Usage
 - Run with playoffs included: 
--python3.11 BetAssist.py --playoffs
+  - python3.11 BetAssist.py --playoffs
 
--Run without playoffs included: 
--python3.11 BetAssist.py
+- Run without playoffs included: 
+  - python3.11 BetAssist.py
 
 
 
