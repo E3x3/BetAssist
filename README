@@ -1,8 +1,18 @@
+Sports betting analysis tool that finds favorable player prop bets in NBA games from PrizePicks
+
 Requires selenium and chrome driver
-If you don't have any of the modules, pip install them
 Must install modules and run with Python 3.11 (without database features, could run with Python 3.9 and above)
 
+## Introduction
+- Overview
+- Features
 
+## Installation
+- Prerequisites
+- Installation Steps
+
+### Usage
+- Examples
 Run with playoffs included: 
 python3.11 BetAssist.py --playoffs
 
