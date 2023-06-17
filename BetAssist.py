@@ -7,8 +7,12 @@ from nba_api.stats.endpoints import playergamelog
 from Scraper import Scraper
 import sys
 import time
+import tkinter as tk
+import tksheet
+import requests
+import statsapi
 
-from constants import BET_ASSIST_URI, BET_ASSIST_DB_COLLECTION, BET_ASSIST_DB_NAME
+#from constants import BET_ASSIST_URI, BET_ASSIST_DB_COLLECTION, BET_ASSIST_DB_NAME
 
 # GLOBALS
 OPPONENT_IND = 4
@@ -24,6 +28,7 @@ TO_IND = 22
 PF_IND = 23
 GAME_TYPE_IND = 0
 MIN_IND = 6
+BASE_URL = 'https://statsapi.mlb.com/api/v1/people/player_id/stats?stats=gameLog&group=category&gameType=R&sitCodes=1,2,3,4,5,6,7,8,9,10,11,12&season=2023&language=en'
 
 NUM_MULTI_PLAYERS = 2
 
@@ -33,17 +38,37 @@ class BetAssist:
     homeTeams = []
     numAPICalls = 0
 
-    def __init__(self, includePlayoffs, homeTeams):
+    def __init__(self, includePlayoffs, homeTeams, sport):
         self.includePlayoffs = includePlayoffs
         self.playerGames = {}
         self.homeTeams = homeTeams
         self.numAPICalls = 0
+        self.sport = sport
+        self.req = requests.Session()
 
-    def _getGames(self, playerID):
+    def _getGames(self, playerID, playerType):
         if playerID not in self.playerGames:
-            regularSeasonGamelogs = playergamelog.PlayerGameLog(playerID)
+            if self.sport == "NBA":
+                regularSeasonGamelogs = playergamelog.PlayerGameLog(playerID)
+                regularSeasonGames = regularSeasonGamelogs.get_dict()['resultSets'][0]['rowSet']
+            if self.sport == "MLB":
+                # Change URL for hitter/pitcher and playerID
+                gamelog_url = BASE_URL.replace("player_id", str(playerID)).replace("category", playerType)
+
+                response = ''
+                while response == '':
+                    try:
+                        response = self.req.get(gamelog_url)
+                        break
+                    except:
+                        print("Connection refused by the server...")
+                        print("Sleeping for 5 seconds.")
+                        time.sleep(5)
+                        print("Continue...")
+
+                regularSeasonGames = response.json()["stats"][0]["splits"]
+
             self.numAPICalls += 1
-            regularSeasonGames = regularSeasonGamelogs.get_dict()['resultSets'][0]['rowSet']
             if self.includePlayoffs:
                 playoffGameLogs = playergamelog.PlayerGameLog(playerID, season_type_all_star="Playoffs")
                 self.numAPICalls += 1
@@ -58,26 +83,47 @@ class BetAssist:
             return self.playerGames[playerID]
 
 
-    def _getPlayerStatlines(self, playerID):
-        games = self._getGames(playerID)
+    def _getPlayerStatlines(self, playerID, playerType):
+        games = self._getGames(playerID, playerType)
         seasonStatlines = []
         for i in range(0, len(games)):
 
             isHomeGame = True
-            if '@' in games[i][OPPONENT_IND]:
-                isHomeGame = False
+            if self.sport == "MLB":
+                isHomeGame = games[i]['isHome']
+            if self.sport == "NBA":
+                if '@' in games[i][OPPONENT_IND]:
+                    isHomeGame = False
 
             isPlayoffGame = False
-            if games[i][GAME_TYPE_IND] == '42022':
-                isPlayoffGame = True
+            if self.sport == "NBA":
+                if games[i][GAME_TYPE_IND] == '42022':
+                    isPlayoffGame = True
 
-            game_dict = {'opp': games[i][OPPONENT_IND][-3:], 'min': games[i][MIN_IND],'home': isHomeGame, 'playoff': isPlayoffGame,
-                         'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND],
-                         '3pm': games[i][THREE_POINT_MAKE_IND], 'stls': games[i][STEAL_IND],
-                         'blks': games[i][BLOCK_IND], 'fga': games[i][FGA_IND], 'tos': games[i][TO_IND],
-                         'pfs': games[i][PF_IND], 'ftm': games[i][FTM_IND]}
+            if self.sport == "NBA":
+                game_dict = {'opp': games[i][OPPONENT_IND][-3:], 'min': games[i][MIN_IND],'home': isHomeGame, 'playoff': isPlayoffGame,
+                            'pts': games[i][POINT_IND], 'asts': games[i][ASSIST_IND], 'rebs': games[i][REB_IND],
+                            '3pm': games[i][THREE_POINT_MAKE_IND], 'stls': games[i][STEAL_IND],
+                            'blks': games[i][BLOCK_IND], 'fga': games[i][FGA_IND], 'tos': games[i][TO_IND],
+                            'pfs': games[i][PF_IND], 'ftm': games[i][FTM_IND]}
+
+            if self.sport == "MLB":
+                if playerType == 'hitting':
+                    opp = statsapi.lookup_team(games[i]["opponent"]["name"])[0]['fileCode'].upper()
+                    game_dict = {'playerType': playerType, 'opp': opp, 'home': isHomeGame, 'playoff': isPlayoffGame,
+                                'tb': games[i]["stat"]["totalBases"], 'hs': games[i]["stat"]["strikeOuts"], 
+                                'r': games[i]["stat"]["runs"]}
+                if playerType == "pitching":
+                    opp = statsapi.lookup_team(games[i]["opponent"]["name"])[0]['fileCode'].upper()
+                    game_dict = {'playerType': playerType, 'opp': opp, 'home': isHomeGame, 'playoff': isPlayoffGame,
+                                'pt': games[i]["stat"]["numberOfPitches"], 'ps': games[i]["stat"]["strikeOuts"], 
+                                'po': games[i]["stat"]["outs"], 'ha': games[i]["stat"]["hits"],'wa': games[i]["stat"]["baseOnBalls"],
+                                'era': games[i]["stat"]["earnedRuns"]}
 
             seasonStatlines.append(game_dict)
+
+        if self.sport == "MLB":
+            seasonStatlines.reverse()
 
         return seasonStatlines
 
@@ -85,20 +131,52 @@ class BetAssist:
         numHits = 0
         totalMin = 0
         for statline in statlines:
-            pts = statline['pts']
-            asts = statline['asts']
-            rebs = statline['rebs']
-            threePointMakes = statline['3pm']
-            stls = statline['stls']
-            blks = statline['blks']
-            fga = statline['fga']
-            tos = statline['tos']
-            pfs = statline['pfs']
-            ftm = statline['ftm']
-            min = statline['min']
+            if self.sport == "NBA":
+                pts = statline['pts']
+                asts = statline['asts']
+                rebs = statline['rebs']
+                threePointMakes = statline['3pm']
+                stls = statline['stls']
+                blks = statline['blks']
+                fga = statline['fga']
+                tos = statline['tos']
+                pfs = statline['pfs']
+                ftm = statline['ftm']
+                min = statline['min']
+                totalMin += min
+                fantasyScore = pts + (1.2 * rebs) + (1.5 * asts) + (3 * blks) + (3 * stls) + (-1 * tos)
+            
+            if self.sport == "MLB":
+                if statline['playerType'] == 'hitting':
+                    tb = statline['tb']
+                    hs = statline['hs']
+                    r = statline['r']
+                if statline['playerType'] == 'pitching':
+                    pt = statline['pt']
+                    ps = statline['ps']
+                    po = statline['po']
+                    ha = statline['ha']
+                    wa = statline['wa']
+                    era = statline['era']
 
-            totalMin += min
-            fantasyScore = pts + (1.2 * rebs) + (1.5 * asts) + (3 * blks) + (3 * stls) + (-1 * tos)
+            if category == 'Pitches Thrown' and pt >= overAmnt:
+                numHits += 1
+            if category == 'Pitcher Strikeouts' and ps >= overAmnt:
+                numHits += 1
+            if category == 'Pitching Outs' and po >= overAmnt:
+                numHits += 1
+            if category == 'Hits Allowed' and ha >= overAmnt:
+                numHits += 1
+            if category == 'Walks Allowed' and wa >= overAmnt:
+                numHits += 1
+            if category == 'Earned Runs Allowed' and era >= overAmnt:
+                numHits += 1
+            if category == 'Total Bases' and tb >= overAmnt:
+                numHits += 1
+            if category == 'Hitter Strikeouts' and hs >= overAmnt:
+                numHits += 1
+            if category == 'Runs' and r >= overAmnt:
+                numHits += 1
             if category == 'Points' and pts >= overAmnt:
                 numHits += 1
             elif category == 'Rebounds' and rebs >= overAmnt:
@@ -133,6 +211,8 @@ class BetAssist:
                 numHits += 1
 
         avgMin = totalMin / len(statlines) if len(statlines) != 0 else 0
+        if sport == "MLB":
+            avgMin = 25
         return ((numHits / len(statlines)), avgMin) if len(statlines) != 0 else ('N/A', avgMin)
 
 
@@ -149,6 +229,110 @@ class BetAssist:
             if entry['Id'] == id:
                 count+=1
         return count
+
+    def _displayTksheet(self, displayData):
+        displayList = [["TOP", "30", "NON-RISKY", "BETS"]]
+        headers = []
+        risky = False
+        riskCounter = 1
+        top_30_len = 0
+        top_15_len = 0
+        bot_20_len = 0
+        bot_15_len = 0
+        for dict in displayData:
+            prop_info = []
+            for key in dict:
+                if key == 'HitPercentagesPrintableDict':
+                    for keyj in dict[key]:
+                        prop_info.append(dict[key][keyj])
+                        headers.append(keyj)
+                headers.append(key)
+                prop_info.append(dict[key])
+                
+            if prop_info[8] != risky:
+                if riskCounter == 1:
+                    top_30_len = len(displayList)
+                    displayList.append(["TOP", "15", "RISKY", "BETS"])
+                if riskCounter == 2:
+                    top_15_len = len(displayList)
+                    displayList.append(["BOTTOM", "20", "NON-RISKY", "BETS"])
+                if riskCounter == 3:
+                    bot_20_len = len(displayList)
+                    displayList.append(["BOTTOM", "15", "RISKY", "BETS"])
+
+                riskCounter += 1
+                risky = prop_info[8]
+
+            displayList.append(prop_info[:5] + prop_info[8:9] + prop_info[11:20])
+
+        if top_30_len == 0:
+            top_30_len = len(displayList)
+        elif top_15_len == 0:
+            top_15_len = len(displayList)   
+        elif bot_20_len == 0:
+            bot_20_len = len(displayList)
+        else:
+            bot_15_len = len(displayList)
+
+        headers = headers[:5] + headers[8:9] + headers[11:20]
+        headers[6] = 'Total Hit %'
+        headers[10] = 'Against Opponent'
+
+        app = tk.Tk()
+
+        screen_width = app.winfo_screenwidth()
+        screen_height = app.winfo_screenheight()
+
+        app.geometry("%dx%d" % (screen_width, screen_height))
+        app.grid_columnconfigure(0, weight = 1)
+        app.grid_rowconfigure(0, weight = 1)
+
+        main_frame = tk.Frame(app)
+        main_frame.grid(row = 0, column = 0, sticky = "nsew", padx = 10, pady = 10)
+
+        main_frame.grid_columnconfigure(0, weight = 1)
+        main_frame.grid_rowconfigure(1, weight = 1)
+        
+        sheet = tksheet.Sheet(main_frame,
+              total_rows = len(displayList),
+              total_columns = len(headers), headers=headers)
+        sheet.grid(row = 1, column = 0, sticky = "nswe", padx = 10, pady = 10)
+
+        sheet.enable_bindings(("single_select",
+
+                       "row_select",
+
+                       "column_width_resize",
+
+                       "arrowkeys",
+
+                       "right_click_popup_menu",
+
+                       "rc_select",
+
+                       "rc_insert_row",
+
+                       "rc_delete_row",
+
+                       "copy",
+
+                       "cut",
+
+                       "paste",
+
+                       "delete",
+
+                       "undo",
+
+                       "edit_cell"))
+        
+        print(top_30_len, top_15_len, bot_20_len, bot_15_len)
+        sheet.set_sheet_data(displayList)
+        sheet.highlight_rows(rows = range(1,top_30_len), bg = "#00ff00")
+        sheet.highlight_rows(rows = range(top_30_len + 1,top_15_len), bg = "#ffff00")
+        sheet.highlight_rows(rows = range(top_15_len + 1,bot_20_len), bg = "#00ff00")
+        sheet.highlight_rows(rows = range(bot_20_len + 1,bot_15_len), bg = "#ffff00")
+        app.mainloop()
 
     """
     def _persistToDatabase(self, entries):
@@ -198,8 +382,8 @@ class BetAssist:
         for i in range(len(betData)):
 
             # necessary so API calls for game data do not cause HTTP Timeout
-            if self.numAPICalls % 8 == 0:
-                time.sleep(5)
+            if self.numAPICalls > 0 and self.numAPICalls % 5 == 0:
+                time.sleep(10)
 
             if i % 30 == 0:
                 elapsedTime = time.time() - startTime
@@ -208,12 +392,13 @@ class BetAssist:
             entry = betData[i]
             playerName = entry['Name']
             playerID = entry['Id']
+            playerType = entry['PlayerType']
             overAmnt = float(entry['Over'])
             category = entry['Prop']
             team = entry['Team']
             opponent = entry['Opponent']
-            entry['AvgMinOverLastFiveGames'] = 0
             entry['Risky'] = False
+            entry['AvgMinOverLastFiveGames'] = 0
             entry['LowFrequency'] = 'N'
             if category == '3-PT Made' or category == 'Blks+Stls' or category == 'Blocked Shots' \
                 or category == 'Steals' or category == 'Turnovers' or category == 'Free Throws Made' \
@@ -221,7 +406,7 @@ class BetAssist:
                     entry['LowFrequency'] = 'Y'
 
 
-            games = self._getPlayerStatlines(playerID)
+            games = self._getPlayerStatlines(playerID, playerType)
 
             lastFiveGames = [games[i] for i in range(len(games)) if i <= 4]
             lastTenGames = [games[i] for i in range(len(games)) if i <= 9]
@@ -332,22 +517,32 @@ class BetAssist:
         print('\n-----------RISKY BETS WITH LOWEST HIT PERCENTAGES (UNDERS)-----------')
 
         self._printBets(bottomRiskyBets)
+        displayData = topNoRiskBets + topRiskyBets + bottomNoRiskBets + bottomRiskyBets
+        self._displayTksheet(displayData)
 
 
 if __name__ == '__main__':
-    homeTeams = input("Enter three-letter home teams separated by commas.\nOnly the games these teams are playing will be considered in the output.\nExample input format: NYK, MIA, BOS\n").split(",")
+    sport = input("Enter the sport you would like to see bets for. (NBA/MLB)\n")
+    homeTeams = input("Enter three-letter home teams separated by commas. Press enter for no Home/Away data. Ex: NYK, MIA, BOS\n").split(",")
     homeTeams = [team.strip().upper() for team in homeTeams]
-    NBAScraper = Scraper()
-    nonPrunedBetData = NBAScraper.scrapeNBAProps()
+    gamesToConsider = input("Enter games to consider by entering at least one of the teams playing in game. Press enter to consider all. Ex: NYK, BOS\n").split(",")
+    gamesToConsider = [team.strip().upper() for team in gamesToConsider]
+    
+    PPScraper = Scraper()
+    nonPrunedBetData = PPScraper.scrapeProps(sport)
+    
+    # test data
+    # nonPrunedBetData = [{'Name': 'Brayan Bello', 'Over': '5.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'BOS', 'Opponent': 'NYY', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 678394}, {'Name': 'Clarke Schmidt', 'Over': '4.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'NYY', 'Opponent': 'BOS', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 657376}, {'Name': 'Blake Snell', 'Over': '6.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'SD ', 'Opponent': ' TB', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 605483}, {'Name': 'Zach Eflin', 'Over': '4.5', 'Prop': 'Pitcher Strikeouts', 'Team': 'TB ', 'Opponent': ' SD', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 621107}, 
+    #                     {'Name': 'Bobby Miller', 'Over': '6.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'LAD', 'Opponent': ' SF', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 676272}, {'Name': 'Alex Wood', 'Over': '4.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'SF ', 'Opponent': 'LAD', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 622072}, {'Name': 'Shane Bieber', 'Over': '4.5', 'Prop': 'Pitcher Strikeouts', 'Team': 'CLE', 'Opponent': 'ARI', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 669456}, {'Name': 'Tommy Henry', 'Over': '3.0', 'Prop': 'Pitcher Strikeouts', 'Team': 'ARI', 'Opponent': 'CLE', 'PlayerType': 'pitching', 'Date': '06/17/2023', 'Id': 674072}, 
+    #                     {'Name': 'Alex Verdugo', 'Over': '1.5', 'Prop': 'Total Bases', 'Team': 'BOS', 'Opponent': 'NYY', 'PlayerType': 'hitting', 'Date': '06/17/2023', 'Id': 657077}, {'Name': 'Rafael Devers', 'Over': '1.5', 'Prop': 'Total Bases', 'Team': 'BOS', 'Opponent': 'NYY', 'PlayerType': 'hitting', 'Date': '06/17/2023', 'Id': 646240}]
 
     prunedBetData = []
     for entry in nonPrunedBetData:
-        if entry['Team'] in homeTeams or entry['Opponent'] in homeTeams:
+        if entry['Team'] in gamesToConsider or entry['Opponent'] in gamesToConsider:
+            prunedBetData.append(entry)
+        if gamesToConsider[0] == '':
             prunedBetData.append(entry)
 
-    if len(sys.argv) > 1 and sys.argv[1] == '--playoffs':
-        betAssist = BetAssist(True, homeTeams)
-        betAssist.findGoodBets(prunedBetData)
-    else:
-        betAssist = BetAssist(False, homeTeams)
-        betAssist.findGoodBets(prunedBetData)
+    # True: include playoffs / False: only regular season
+    betAssist = BetAssist(False, homeTeams, sport)
+    betAssist.findGoodBets(prunedBetData)
