@@ -15,6 +15,13 @@ import statsapi
 #from constants import BET_ASSIST_URI, BET_ASSIST_DB_COLLECTION, BET_ASSIST_DB_NAME
 
 # GLOBALS
+
+MLB_ABBREVIATIONS = {"Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL", "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS", "Chicago Cubs": "CHC",
+                     "Chicago White Sox": "CWS", "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE", "Colorado Rockies": "COL", "Detroit Tigers": "DET", 
+                     "Miami Marlins": "MIA", "Houston Astros": "HOU", "Kansas City Royals": "KAN", "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
+                     "Milwaukee Brewers": "MIL", "Minnesota Twins": "MIN", "New York Mets": "NYM", "New York Yankees": "NYY", "Oakland Athletics": "OAK",
+                     "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT", "San Diego Padres": "SD", "San Francisco Giants": "SF", "Seattle Mariners": "SEA",
+                      "St. Louis Cardinals": "STL", "Tampa Bay Rays": "TB", "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR", "Washington Nationals": "WAS" }
 OPPONENT_IND = 4
 POINT_IND = 24
 REB_IND = 18
@@ -108,13 +115,12 @@ class BetAssist:
                             'pfs': games[i][PF_IND], 'ftm': games[i][FTM_IND]}
 
             if self.sport == "MLB":
+                opp = MLB_ABBREVIATIONS[games[i]["opponent"]["name"]]
                 if playerType == 'hitting':
-                    opp = statsapi.lookup_team(games[i]["opponent"]["name"])[0]['fileCode'].upper()
                     game_dict = {'playerType': playerType, 'opp': opp, 'home': isHomeGame, 'playoff': isPlayoffGame,
                                 'tb': games[i]["stat"]["totalBases"], 'hs': games[i]["stat"]["strikeOuts"], 
                                 'r': games[i]["stat"]["runs"]}
                 if playerType == "pitching":
-                    opp = statsapi.lookup_team(games[i]["opponent"]["name"])[0]['fileCode'].upper()
                     game_dict = {'playerType': playerType, 'opp': opp, 'home': isHomeGame, 'playoff': isPlayoffGame,
                                 'pt': games[i]["stat"]["numberOfPitches"], 'ps': games[i]["stat"]["strikeOuts"], 
                                 'po': games[i]["stat"]["outs"], 'ha': games[i]["stat"]["hits"],'wa': games[i]["stat"]["baseOnBalls"],
@@ -326,7 +332,6 @@ class BetAssist:
 
                        "edit_cell"))
         
-        print(top_30_len, top_15_len, bot_20_len, bot_15_len)
         sheet.set_sheet_data(displayList)
         sheet.highlight_rows(rows = range(1,top_30_len), bg = "#00ff00")
         sheet.highlight_rows(rows = range(top_30_len + 1,top_15_len), bg = "#ffff00")
