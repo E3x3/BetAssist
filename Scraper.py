@@ -19,7 +19,7 @@ class Scraper:
         driver = uc.Chrome(options=options, version_main=113)
         driver.get("https://app.prizepicks.com/")
 
-        time.sleep(5)
+        time.sleep(8)
         driver.find_element(By.XPATH, "/html/body/div[2]/div[3]/div/div/div[3]/button").click()
         time.sleep(1)
 
@@ -107,7 +107,7 @@ class Scraper:
                         time.sleep(5)
                         print("Continue...")
 
-            if len(playerlist) != 0:
+            if len(playerlist) == 1:
                 newPlayer = player
                 newPlayer['Id'] = playerlist[0]['id']
                 ppPlayersTrimmed.append(newPlayer)
